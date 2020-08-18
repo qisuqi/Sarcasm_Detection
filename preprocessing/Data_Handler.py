@@ -79,3 +79,11 @@ def ROC_Curve(fpr, tpr, roc_auc):
     plt.legend(loc="lower right")
     plt.show()
 
+def Error_Accuracy(loss, accuracy):
+    plt.plot(loss, label='Error')
+    plt.plot(accuracy, label='Accuracy')
+    plt.title('10-Fold N-gram Baseline Model')
+    plt.xlabel('Folds')
+    plt.ylabel('Accuracy/Error')
+    plt.legend()
+    plt.show()
