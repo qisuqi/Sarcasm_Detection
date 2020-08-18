@@ -1,36 +1,17 @@
-import pandas as pd
-import numpy as np
 import time
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import LabelEncoder
+import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.model_selection import KFold, train_test_split, cross_val_predict
 from sklearn.svm import SVC
-from sklearn.metrics import f1_score, roc_curve, auc, classification_report
+from sklearn.metrics import roc_curve, auc, classification_report
+import Data_Handler
 
-def load_dataset(filename):
-    data = pd.read_csv(filename)
-    dataset = data.values
-    x = dataset[:, -1]
-    y = dataset[:, 2]
-    x = x.astype(str)
-    #y = y.reshape((len(y), 1))
-    return x, y
-
-def prepare_targets(y):
-    le = LabelEncoder()
-    le.fit(y)
-    y_enc = le.transform(y)
-    return y_enc
-
-
-x, y = load_dataset('Riloff_tweets_cleaned2.csv')
+x, y = Data_Handler.load_dataset('Riloff_tweets_cleaned2.csv')
+label = Data_Handler.prepare_targets(y)
 
 bigram_train_vec = CountVectorizer(ngram_range=(1, 2))
 bigram_train_words = bigram_train_vec.fit_transform(x)
-
-label = prepare_targets(y)
 
 #transformer = TfidfTransformer(norm=None, smooth_idf=False, sublinear_tf=False, use_idf=True)
 #tfidf_train_words = transformer.fit_transform(bigram_train_words)-bigram_train_words
@@ -80,23 +61,9 @@ Y_pred[Y_pred > 0.5] = 1.
 
 print(classification_report(Y_test, Y_pred))
 
-plt.plot(Error, label='Error')
-plt.plot(Accuracy, label='Accuracy')
-plt.title('10-Fold N-gram Baseline Model')
-plt.xlabel('Folds')
-plt.ylabel('Accuracy/Error')
-plt.legend()
-plt.show()
+Data_Handler.Error_Accuracy(Error, Accuracy)
 
-plt.plot(fpr, tpr, color='darkorange', label='ROC curve (area = %0.2f)' % roc_auc)
-plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
-plt.xlim([0.0, 1.0])
-plt.ylim([0.0, 1.05])
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('ROC Curve')
-plt.legend(loc="lower right")
-plt.show()
+Data_Handler.ROC_Curve(fpr, tpr, roc_auc)
 
 
 
