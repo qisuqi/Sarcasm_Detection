@@ -101,35 +101,8 @@ Data_Handler.plot_acc(history.history['accuracy'],
 
 test_result = model.evaluate([padded_test_tweets, aux_test], y_test)
 
-precision = test_result[6]
-recall = test_result[7]
-f1 = 2*(precision*recall)/(precision+recall)
-
-print('Testing accuracy:', test_result[5],
-      'Testing F1 Score:', f1,
-      'Testing Loss:', test_result[0],
-      'Testing AUC: ', test_result[8])
-
 #writer = tf.summary.create_file_writer(logdir)
 #writer.close()
-
-
-tp = test_result[1].astype(int)
-fp = test_result[2].astype(int)
-tn = test_result[3].astype(int)
-fn = test_result[4].astype(int)
-
-cm = [[tn, fp], [fn, tp]]
-sns.heatmap(cm, annot=True, fmt="d")
-plt.title('Confusion matrix')
-plt.ylabel('True label')
-plt.xlabel('Predicted label')
-plt.title('Confusion Matrix')
-b, t = plt.ylim()
-b += 0.5
-t -= 0.5
-plt.ylim(b, t)
-plt.show()
 
 y_pred = model.predict([padded_test_tweets, aux_test])
 
