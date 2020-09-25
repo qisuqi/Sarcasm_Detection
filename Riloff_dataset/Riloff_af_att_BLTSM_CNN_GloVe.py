@@ -1,58 +1,42 @@
-import pandas as pd
 import numpy as np
-from operator import truediv
-import math
-from keras.preprocessing.text import Tokenizer
-from keras.preprocessing.sequence import pad_sequences
-from keras.callbacks import EarlyStopping
-from keras.utils.vis_utils import plot_model
-from sklearn.metrics import roc_curve, auc, classification_report
-import time, warnings
-import Data_Handler, Features, Models
+import matplotlib.pyplot as plt
+import seaborn as sns
+import time
+import tensorflow.keras as keras
+from tensorflow.keras.callbacks import EarlyStopping, TensorBoard
+from tensorflow.keras.utils import plot_model
+from sklearn.metrics import classification_report
+import Data_Handler, Models, Features
 
-warnings.filterwarnings('ignore')
+max_length = 20
+dimension = 200
+batch_size = 64
+epochs = 200
 
-file = pd.read_csv('Riloff_tweets_cleaned.csv')
+#logdir = '.\TF_logs3'
 
-x, y = Data_Handler.load_dataset('Riloff_tweets_cleaned2.csv')
+METRICS = [
+      keras.metrics.TruePositives(name='tp'),
+      keras.metrics.FalsePositives(name='fp'),
+      keras.metrics.TrueNegatives(name='tn'),
+      keras.metrics.FalseNegatives(name='fn'),
+      keras.metrics.BinaryAccuracy(name='accuracy'),
+      keras.metrics.Precision(name='precision'),
+      keras.metrics.Recall(name='recall'),
+      keras.metrics.AUC(name='auc'),
+]
 
-Length = []
+x_train, x_val, x_test, aux_train, aux_val, aux_test, y_train, y_val, y_test = \
+    Data_Handler.load_and_split_dataset('Harvested_Training.csv', 'Harvested_Validation.csv', 'Harvested_Testing.csv')
 
-for i in x:
-    length = len(i)
-    Length.append(length)
+y_train = keras.utils.to_categorical(y_train)
+y_val = keras.utils.to_categorical(y_val)
+y_test = keras.utils.to_categorical(y_test)
 
-max_length = 18 #max(Length)
-val_split = 0.2
-dimension = 50
-batch_size = 32
-epochs = 20
-delta = 3
+t, vocab_size, padded_train_tweets, padded_val_tweets, padded_test_tweets = \
+    Data_Handler.pad_tweets('Harvested_cleaned.csv', max_length, x_train, x_val, x_test)
 
-PW, NW, Pos, Neg, Pos_Adj, Pos_Adv, Pos_Ver, Neg_Adj, Neg_Adv, Neg_Ver = Features.PoS_features(x)
-Excl, Ques, Quos, Dots, Caps, Pos_emo, Neg_emo = Features.Punc_features(file['tweets'])
-
-lista = (delta * PW + Pos) - (delta * NW + Neg)
-listb = (delta * PW + Pos) + (delta * NW + Neg)
-
-ratio = list(map(truediv, lista, listb))
-Ratio = [0 if math.isnan(x) else x for x in ratio]
-Ratio = Features.Reshape(Ratio)
-
-aux = np.concatenate((Pos_Adj, Pos_Adv, Pos_Ver, Neg_Adj, Neg_Adv, Neg_Ver, Pos, Neg, Excl, Ques, Dots, Quos, Caps,
-                           PW, NW, Ratio, Pos_emo, Neg_emo))
-
-aux = aux.reshape((877, 18))
-Aux = np.expand_dims(aux, axis=-1)
-
-t = Tokenizer()
-t.fit_on_texts(x)
-vocab_size = len(t.word_index) + 1
-
-encoded_tweets = t.texts_to_sequences(x)
-padded_tweets = pad_sequences(encoded_tweets, maxlen=max_length, padding='post')
-
-embedding_index = Features.Load_GloVe('glove/glove.twitter.27B.50d.txt')
+embedding_index = Data_Handler.Load_GloVe('glove/glove.twitter.27B.200d.txt')
 
 embedding_matrix = np.zeros((vocab_size, dimension))
 
@@ -60,48 +44,105 @@ for word, i in t.word_index.items():
     embedding_vector = embedding_index.get(word)
     if embedding_vector is not None:
         embedding_matrix[i] = embedding_vector
+    else:
+        embedding_matrix[i] = np.random.normal(0, 0, dimension)
 
-x_train, y_train, x_val, y_val, x_test, y_test = Data_Handler.split_dataset(padded_tweets, y)
-aux_train, aux_val, aux_test = Data_Handler.split_features(Aux)
+weight_for_0, weight_for_1, initial_bias = Data_Handler.get_class_weights('Harvested_Cleaned.csv')
+class_weight = {0: weight_for_0, 1: weight_for_1}
+
+model = Models.af_att_BLSTM_CNN(att_type='self_att',
+                                embedding_model='glove',
+                                max_length=max_length,
+                                vocab_size=vocab_size,
+                                dimension=dimension,
+                                embedding_matrix=embedding_matrix)
+                                #initial_bias=initial_bias)
+
+print(model.summary())
+
+#plot_model(model, show_shapes=True, to_file='af_att_BLSTM_CNN_GloVe.png')
+
+early_stopping = EarlyStopping(
+    monitor='val_auc',
+    verbose=0,
+    patience=10,
+    mode='max',
+    restore_best_weights=True)
+
+#tensorboard = TensorBoard(
+ # log_dir='.\TF_logs3',
+ # histogram_freq=1,
+ # write_images=True
+#)
+
+#callbacks = [tensorboard]
 
 start_time = time.time()
 
-model = Models.af_att_BLTSM_CNN(max_length=max_length, vocab_size=vocab_size, dimension=dimension,
-                                embedding_matrix=embedding_matrix)
+model.compile(loss=keras.losses.CategoricalCrossentropy(),
+              optimizer=keras.optimizers.Adam(learning_rate=0.005),
+              metrics=METRICS)
 
-model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
-print(model.summary())
-
-#plot_model(model, show_shapes=True, to_file='With_Features.png')
-
-#callbacks = [EarlyStopping(monitor='loss')]
-
-history = model.fit([x_train, aux_train], y_train, batch_size=batch_size, epochs=epochs, verbose=0,
-                    validation_data=([x_val, aux_val], y_val))#, callbacks=callbacks)
-
-test_loss, test_accuracy = model.evaluate([x_test, aux_test], y_test, batch_size=batch_size, verbose=0)
-train_loss, train_accuracy = model.evaluate([x_train, aux_train], y_train, batch_size=batch_size, verbose=0)
+history = model.fit([padded_train_tweets, aux_train], y_train,
+                    batch_size=batch_size,
+                    epochs=epochs,
+                    verbose=1,
+                    validation_data=([padded_val_tweets, aux_val], y_val),
+                    callbacks=[early_stopping])
 
 end_time = time.time()
+print('Finished Training with {} seconds'.format(end_time-start_time))
 
-print('Testing Accuracy is', test_accuracy*100, 'Testing Loss is', test_loss*100, 'Training Accuracy is',
-      train_accuracy*100, 'Training Loss is', train_loss*100, 'Training time is', end_time-start_time)
+Data_Handler.plot_loss(history.history['loss'],
+                       history.history['val_loss'])
 
-y_pred = model.predict([x_test, aux_test])
+Data_Handler.plot_acc(history.history['accuracy'],
+                      history.history['val_accuracy'])
 
-fpr, tpr, thres = roc_curve(y_test, y_pred)
-roc_auc = auc(fpr, tpr)
+test_result = model.evaluate([padded_test_tweets, aux_test], y_test)
 
-y_pred[y_pred <= 0.5] = 0.
-y_pred[y_pred > 0.5] = 1.
+precision = test_result[6]
+recall = test_result[7]
+f1 = 2*(precision*recall)/(precision+recall)
+
+print('Testing accuracy:', test_result[5],
+      'Testing F1 Score:', f1,
+      'Testing Loss:', test_result[0],
+      'Testing AUC: ', test_result[8])
+
+#writer = tf.summary.create_file_writer(logdir)
+#writer.close()
+
+
+tp = test_result[1].astype(int)
+fp = test_result[2].astype(int)
+tn = test_result[3].astype(int)
+fn = test_result[4].astype(int)
+
+cm = [[tn, fp], [fn, tp]]
+sns.heatmap(cm, annot=True, fmt="d")
+plt.title('Confusion matrix')
+plt.ylabel('True label')
+plt.xlabel('Predicted label')
+plt.title('Confusion Matrix')
+b, t = plt.ylim()
+b += 0.5
+t -= 0.5
+plt.ylim(b, t)
+plt.show()
+
+y_pred = model.predict([padded_test_tweets, aux_test])
+
+y_test = np.argmax(y_test, axis=-1)
+y_pred = np.argmax(y_pred, axis=-1)
 
 print(classification_report(y_test, y_pred))
 
-Data_Handler.Training_Curve(history.history['loss'], history.history['accuracy'], history.history['val_loss'],
-                            history.history['val_accuracy'])
+Data_Handler.plot_cm(y_test, y_pred)
 
-Data_Handler.ROC_Curve(fpr, tpr, roc_auc)
+Data_Handler.plot_roc(y_test, y_pred)
 
+Data_Handler.plot_ypred_ytest(y_test, y_pred)
 
-
+#tensorboard --logdir=C:\Users\Qiqi\DataScience\Datasets_Codes\TF_logs --host=127.0.0.1
 
